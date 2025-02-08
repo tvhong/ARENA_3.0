@@ -18,7 +18,7 @@ from tqdm import tqdm
 # Make sure exercises are in the path
 chapter = "chapter0_fundamentals"
 section = "part1_ray_tracing"
-root_dir = next(p for p in Path.cwd().parents if (p / chapter).exists())
+root_dir = next(p for p in [Path.cwd()] + list(Path.cwd().parents) if (p / chapter).exists())
 exercises_dir = root_dir / chapter / "exercises"
 section_dir = exercises_dir / section
 if str(exercises_dir) not in sys.path:
@@ -47,8 +47,30 @@ def make_rays_1d(num_pixels: int, y_limit: float) -> Tensor:
         [[0, 0, 0], [1, 1, 0]],
     ]
     """
-    raise NotImplementedError()
+    def sol1():
+        rays = t.zeros((num_pixels, 2, 3))
+
+        # Init origins
+        rays[:, 0, :] = 0 # unnecessary as it's already 0
+
+        # Set directions
+        y_values = t.linspace(-y_limit, y_limit, num_pixels)
+        rays[:, 1, 0] = 1
+        rays[:, 1, 1] = y_values
+        rays[:, 1, 2] = 0
+        return rays
+
+    def sol2():
+        rays = t.zeros((num_pixels, 2, 3))
+        t.linspace(-y_limit, y_limit, num_pixels, out=rays[:, 1, 1])
+        rays[:, 1, 0] = 1
+        return rays
+
+    return sol2()
 
 
 rays1d = make_rays_1d(9, 10.0)
 fig = render_lines_with_plotly(rays1d)
+
+# %%
+
