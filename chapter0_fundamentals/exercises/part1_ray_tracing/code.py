@@ -269,3 +269,139 @@ def make_rays_2d(num_pixels_y: int, num_pixels_z: int, y_limit: float, z_limit: 
 
 rays_2d = make_rays_2d(10, 10, 0.3, 0.3)
 render_lines_with_plotly(rays_2d)
+
+
+# %%
+
+#one_triangle = t.tensor([[0, 0, 0], [4, 0.5, 0], [2, 3, 0]])
+#A, B, C = one_triangle
+#x, y, z = one_triangle.T
+#
+#fig: go.FigureWidget = setup_widget_fig_triangle(x, y, z)
+#display(fig)
+#
+#
+#@interact(u=(-0.5, 1.5, 0.01), v=(-0.5, 1.5, 0.01))
+#def update(u=0.0, v=0.0):
+#    P = A + u * (B - A) + v * (C - A)
+#    fig.update_traces({"x": [P[0]], "y": [P[1]]}, 2)
+    
+# %%
+
+Point = Float[Tensor, "points=3"]
+
+
+def triangle_ray_intersects(A: Point, B: Point, C: Point, O: Point, D: Point) -> bool:
+    """
+    A: shape (3,), one vertex of the triangle
+    B: shape (3,), second vertex of the triangle
+    C: shape (3,), third vertex of the triangle
+    O: shape (3,), origin point
+    D: shape (3,), direction point
+
+    Return True if the ray and the triangle intersect.
+    """
+    mat = t.stack((-D, (B - A), (C - A)), dim=-1)
+    assert mat.shape == (3, 3)
+
+    vec = O - A
+
+    try:
+        s, u, v = t.linalg.solve(mat, vec)
+    except t.linalg.LinAlgError:
+        return False
+    
+    return s >= 0 and 0 <= u and 0 <= v and u + v <= 1
+
+tests.test_triangle_ray_intersects(triangle_ray_intersects)
+
+# %%
+def raytrace_triangle(
+    rays: Float[Tensor, "nrays rayPoints=2 dims=3"], triangle: Float[Tensor, "trianglePoints=3 dims=3"]
+) -> Bool[Tensor, "nrays"]:
+    """
+    For each ray, return True if the triangle intersects that ray.
+    """
+    n = rays.shape[0]
+
+    A, B, C = triangle
+    assert A.shape == B.shape == C.shape == (3, )
+
+    O, D = rays[:, 0, :], rays[:, 1, :]
+    assert O.shape == D.shape == (n, 3)
+
+    mat = t.stack((-D,
+                   einops.repeat((B - A), 'v -> n v', n=n),
+                   einops.repeat((C - A), 'v -> n v', n=n)),
+                   dim=-1)
+
+    assert mat.shape == (n, 3, 3)
+
+    vec = O - A
+    assert vec.shape == (n, 3)
+
+    is_singular = t.linalg.det(mat).abs() < 1e-8
+    assert is_singular.shape == (n, )
+
+    mat[is_singular] = t.eye(3)
+    sol = t.linalg.solve(mat, vec)
+    assert sol.shape == (n, 3)
+
+    s, u, v = sol[:, 0], sol[:, 1], sol[:, 2]
+    
+    return (~is_singular) & (s >= 0) & (0 <= u) & (0 <= v) & (u + v <= 1)
+
+
+
+A = t.tensor([1, 0.0, -0.5])
+B = t.tensor([1, -0.5, 0.0])
+C = t.tensor([1, 0.5, 0.5])
+num_pixels_y = num_pixels_z = 50
+y_limit = z_limit = 0.5
+
+# Plot triangle & rays
+test_triangle = t.stack([A, B, C], dim=0)
+rays2d = make_rays_2d(num_pixels_y, num_pixels_z, y_limit, z_limit)
+triangle_lines = t.stack([A, B, C, A, B, C], dim=0).reshape(-1, 2, 3)
+render_lines_with_plotly(rays2d, triangle_lines)
+
+# Calculate and display intersections
+intersects = raytrace_triangle(rays2d, test_triangle)
+img = intersects.reshape(num_pixels_y, num_pixels_z).int()
+imshow(img, origin="lower", width=600, title="Triangle (as intersected by rays)")
+
+# %%
+
+def raytrace_triangle_with_bug(
+    rays: Float[Tensor, "nrays rayPoints=2 dims=3"],
+    triangle: Float[Tensor, "trianglePoints=3 dims=3"]
+) -> Bool[Tensor, "nrays"]:
+    '''
+    For each ray, return True if the triangle intersects that ray.
+    '''
+    NR = rays.size()[0]
+
+    A, B, C = einops.repeat(triangle, "pts dims -> pts NR dims", NR=NR)
+    assert A.shape == B.shape == C.shape == (NR, 3)
+
+    O, D = rays.unbind(1)
+    assert O.shape == D.shape == (NR, 3)
+
+    mat = t.stack([- D, B - A, C - A], dim=-1)
+    
+    dets = t.linalg.det(mat)
+    is_singular = dets.abs() < 1e-8
+    mat[is_singular] = t.eye(3)
+
+    vec = O - A
+
+    sol = t.linalg.solve(mat, vec)
+    assert sol.shape == (NR, 3)
+    s, u, v = sol.unbind(dim=-1)
+
+    return ((u >= 0) & (v >= 0) & (u + v <= 1) & ~is_singular)
+
+
+intersects = raytrace_triangle_with_bug(rays2d, test_triangle)
+img = intersects.reshape(num_pixels_y, num_pixels_z).int()
+imshow(img, origin="lower", width=600, title="Triangle (as intersected by rays)")
