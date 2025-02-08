@@ -179,11 +179,93 @@ def intersect_rays_1d(
         return result
     
     def sol2():
+        nonlocal rays, segments
+        nrays = rays.shape[0]
+        nsegments = segments.shape[0]
 
-        pass
+        # Convert points to 2D
+        rays = rays[..., :2]
+        segments = segments[..., :2]
+
+        # Reshape rays and segements
+        rays = einops.repeat(rays, 'nrays npoints ndim -> nrays nsegments npoints ndim', nsegments=nsegments)
+        segments = einops.repeat(segments, 'nsegments npoints ndim -> nrays nsegments npoints ndim', nrays=nrays)
+        assert rays.shape == (nrays, nsegments, 2, 2)
+        assert segments.shape == (nrays, nsegments, 2, 2)
+
+        O, D = rays[:, :, 0, :], rays[:, :, 1, :]
+        L1, L2 = segments[:, :, 0, :], segments[:, :, 1, :]
+
+        mat = t.stack((D, L1 - L2), dim=-1)
+        vec = L1 - O
+        assert mat.shape == (nrays, nsegments, 2, 2)
+        assert vec.shape == (nrays, nsegments, 2)
+
+        dets = t.linalg.det(mat)
+        is_singular = dets.abs() < 1e-8
+        mat[is_singular] = t.eye(2)
+
+        sol = t.linalg.solve(mat, vec)
+        assert sol.shape == (nrays, nsegments, 2)
+        u = sol[..., 0]
+        v = sol[..., 1]
+
+        is_valid = (u >= 0) & (0 <= v) & (v <= 1)
+        assert is_valid.shape == (nrays, nsegments)
+
+        return (~is_singular & is_valid).any(dim=-1)
 
     return sol2()
 
 
 tests.test_intersect_rays_1d(intersect_rays_1d)
 tests.test_intersect_rays_1d_special_case(intersect_rays_1d)
+
+
+# %%
+
+def make_rays_2d(num_pixels_y: int, num_pixels_z: int, y_limit: float, z_limit: float) -> Float[Tensor, "nrays 2 3"]:
+    """
+    num_pixels_y: The number of pixels in the y dimension
+    num_pixels_z: The number of pixels in the z dimension
+
+    y_limit: At x=1, the rays should extend from -y_limit to +y_limit, inclusive of both.
+    z_limit: At x=1, the rays should extend from -z_limit to +z_limit, inclusive of both.
+
+    Returns: shape (num_rays=num_pixels_y * num_pixels_z, num_points=2, num_dims=3).
+    """
+    def sol1():
+        rays = t.zeros((num_pixels_y * num_pixels_z, 2, 3))
+        ys = t.linspace(-y_limit, y_limit, num_pixels_y)
+        zs = t.linspace(-z_limit, z_limit, num_pixels_z)
+
+        # Set directions
+        rays[:, 1, 0] = 1
+        rays[:, 1, 1] = einops.repeat(ys, 'y -> (y z)', z=num_pixels_z)
+        rays[:, 1, 2] = einops.repeat(zs, 'z -> (y z)', y=num_pixels_y)
+
+        return rays
+    
+    def sol2():
+        ys = t.linspace(-y_limit, y_limit, num_pixels_y)
+        zs = t.linspace(-z_limit, z_limit, num_pixels_z)
+
+        directions = t.stack(
+            (
+                t.ones(num_pixels_y * num_pixels_z),
+                einops.repeat(ys, "y -> (y z)", z=num_pixels_z),
+                einops.repeat(zs, "z -> (y z)", y=num_pixels_y),
+            ),
+            dim=-1,
+        )
+        assert directions.shape == (num_pixels_y * num_pixels_z, 3)
+
+        origins = t.zeros(num_pixels_y * num_pixels_z, 3)
+        rays = t.stack((origins, directions), dim=1)
+        return rays
+
+    return sol2()
+
+
+rays_2d = make_rays_2d(10, 10, 0.3, 0.3)
+render_lines_with_plotly(rays_2d)
