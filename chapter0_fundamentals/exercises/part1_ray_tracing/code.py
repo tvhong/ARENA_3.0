@@ -405,3 +405,158 @@ def raytrace_triangle_with_bug(
 intersects = raytrace_triangle_with_bug(rays2d, test_triangle)
 img = intersects.reshape(num_pixels_y, num_pixels_z).int()
 imshow(img, origin="lower", width=600, title="Triangle (as intersected by rays)")
+
+# %%
+
+triangles = t.load(section_dir / "pikachu.pt", weights_only=True)
+
+def raytrace_mesh(
+    rays: Float[Tensor, "nrays rayPoints=2 dims=3"], triangles: Float[Tensor, "ntriangles trianglePoints=3 dims=3"]
+) -> Float[Tensor, "nrays"]:
+    """
+    For each ray, return the distance to the closest intersecting triangle, or infinity.
+    """
+    nrays = rays.shape[0]
+    ntriangles = triangles.shape[0]
+
+    # Extract triangles
+    A, B, C = einops.repeat(
+        triangles,
+        'ntriangles pts dims -> nrays ntriangles pts dims',
+        nrays=nrays).unbind(dim=2)
+    assert A.shape == B.shape == C.shape == (nrays, ntriangles, 3)
+
+    # Extract rays
+    O, D = einops.repeat(
+        rays,
+        'nrays rayPoints dims -> nrays ntriangles rayPoints dims',
+        ntriangles=ntriangles
+    ).unbind(dim=2)
+    assert O.shape == D.shape == (nrays, ntriangles, 3)
+
+    # Solve the equations
+    mat = t.stack([-D, B - A, C - A], dim=-1)
+    assert mat.shape == (nrays, ntriangles, 3, 3)
+
+    # Guard against equations without a solution
+    is_singular = t.linalg.det(mat).abs() < 1e-8
+    mat[is_singular] = t.eye(3)
+
+    vec = O - A
+
+    sol = t.linalg.solve(mat, vec)
+    assert sol.shape == (nrays, ntriangles, 3)
+
+    # Filter out invalid solutions
+    s, u, v = sol.unbind(dim=-1)
+    is_valid = ~is_singular & (u >= 0) & (v >= 0) & (u + v <= 1)
+    s[~is_valid] = t.tensor(float("inf"))
+
+    # Find the min(s) for each ray
+    return s.min(dim=-1).values
+
+
+num_pixels_y = 120
+num_pixels_z = 120
+y_limit = z_limit = 1
+
+rays = make_rays_2d(num_pixels_y, num_pixels_z, y_limit, z_limit)
+rays[:, 0] = t.tensor([-2, 0.0, 0.0])
+dists = raytrace_mesh(rays, triangles)
+intersects = t.isfinite(dists).view(num_pixels_y, num_pixels_z)
+dists_square = dists.view(num_pixels_y, num_pixels_z)
+img = t.stack([intersects, dists_square], dim=0)
+
+fig = px.imshow(img, facet_col=0, origin="lower", color_continuous_scale="magma", width=1000)
+fig.update_layout(coloraxis_showscale=False)
+for i, text in enumerate(["Intersects", "Distance"]):
+    fig.layout.annotations[i]["text"] = text
+fig.show()
+
+# %%
+
+def rotation_matrix(theta: Float[Tensor, ""]) -> Float[Tensor, "rows cols"]:
+    """
+    Creates a rotation matrix representing a counterclockwise rotation of `theta` around the y-axis.
+    """
+    return t.tensor([
+        [t.cos(theta), 0, t.sin(theta)],
+        [0, 1, 0],
+        [-t.sin(theta), 0, t.cos(theta)]
+    ])
+
+tests.test_rotation_matrix(rotation_matrix)
+
+# %%
+
+def raytrace_mesh_video(
+    rays: Float[Tensor, "nrays points dim"],
+    triangles: Float[Tensor, "ntriangles points dims"],
+    rotation_matrix: Callable[[float], Float[Tensor, "rows cols"]],
+    raytrace_function: Callable,
+    num_frames: int,
+) -> Bool[Tensor, "nframes nrays"]:
+    """
+    Creates a stack of raytracing results, rotating the triangles by `rotation_matrix` each frame.
+    """
+    result = []
+    theta = t.tensor(2 * t.pi) / num_frames
+    R = rotation_matrix(theta)
+    for theta in tqdm(range(num_frames)):
+        triangles = triangles @ R
+        result.append(raytrace_function(rays, triangles))
+        t.cuda.empty_cache()  # clears GPU memory (this line will be more important later on!)
+    return t.stack(result, dim=0)
+
+
+def display_video(distances: Float[Tensor, "frames y z"]):
+    """
+    Displays video of raytracing results, using Plotly. `distances` is a tensor where the [i, y, z] element is distance
+    to the closest triangle for the i-th frame & the [y, z]-th ray in our 2D grid of rays.
+    """
+    px.imshow(
+        distances,
+        animation_frame=0,
+        origin="lower",
+        zmin=0.0,
+        zmax=distances[distances.isfinite()].quantile(0.99).item(),
+        color_continuous_scale="viridis_r",  # "Brwnyl"
+    ).update_layout(coloraxis_showscale=False, width=550, height=600, title="Raytrace mesh video").show()
+
+
+num_pixels_y = 250
+num_pixels_z = 250
+y_limit = z_limit = 0.8
+num_frames = 50
+
+rays = make_rays_2d(num_pixels_y, num_pixels_z, y_limit, z_limit)
+rays[:, 0] = t.tensor([-3.0, 0.0, 0.0])
+dists = raytrace_mesh_video(rays, triangles, rotation_matrix, raytrace_mesh, num_frames)
+dists = einops.rearrange(dists, "frames (y z) -> frames y z", y=num_pixels_y)
+
+display_video(dists)
+
+# %%
+
+def raytrace_mesh_gpu(
+    rays: Float[Tensor, "nrays rayPoints=2 dims=3"], triangles: Float[Tensor, "ntriangles trianglePoints=3 dims=3"]
+) -> Float[Tensor, "nrays"]:
+    """
+    For each ray, return the distance to the closest intersecting triangle, or infinity.
+
+    All computations should be performed on the GPU.
+    """
+    if not t.cuda.is_available():
+        raise RuntimeError("CUDA is not available")
+    
+    rays = rays.cuda()
+    triangles = triangles.cuda()
+    return raytrace_mesh(rays, triangles).cpu()
+
+
+dists = raytrace_mesh_video(rays, triangles, rotation_matrix, raytrace_mesh_gpu, num_frames)
+dists = einops.rearrange(dists, "frames (y z) -> frames y z", y=num_pixels_y)
+display_video(dists)
+
+# %%
+
