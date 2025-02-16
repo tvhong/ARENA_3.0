@@ -249,32 +249,31 @@ mnist_trainloader = DataLoader(mnist_trainset, batch_size=batch_size, shuffle=Tr
 optimizer = t.optim.Adam(model.parameters(), lr=1e-3)
 loss_list = []
 
-for epoch in range(epochs):
-    pbar = tqdm(mnist_trainloader)
+# for epoch in range(epochs):
+#     pbar = tqdm(mnist_trainloader)
 
-    for imgs, labels in pbar:
-        # Move data to device, perform forward pass
-        imgs, labels = imgs.to(device), labels.to(device)
-        logits = model(imgs)
+#     for imgs, labels in pbar:
+#         # Move data to device, perform forward pass
+#         imgs, labels = imgs.to(device), labels.to(device)
+#         logits = model(imgs)
 
-        # Calculate loss, perform backward pass
-        loss = F.cross_entropy(logits, labels)
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+#         # Calculate loss, perform backward pass
+#         loss = F.cross_entropy(logits, labels)
+#         loss.backward()
+#         optimizer.step()
+#         optimizer.zero_grad()
 
-        # Update logs & progress bar
-        loss_list.append(loss.item())
-        pbar.set_postfix(epoch=f"{epoch+1}/{epochs}", loss=f"{loss:.3f}")
-# %%
+#         # Update logs & progress bar
+#         loss_list.append(loss.item())
+#         pbar.set_postfix(epoch=f"{epoch+1}/{epochs}", loss=f"{loss:.3f}")
 
-line(
-    loss_list,
-    x_max=epochs * len(mnist_trainset),
-    labels={"x": "Examples seen", "y": "Cross entropy loss"},
-    title="SimpleMLP training on MNIST",
-    width=700,
-)
+# line(
+#     loss_list,
+#     x_max=epochs * len(mnist_trainset),
+#     labels={"x": "Examples seen", "y": "Cross entropy loss"},
+#     title="SimpleMLP training on MNIST",
+#     width=700,
+# )
 # %%
 @dataclass
 class SimpleMLPTrainingArgs:
@@ -330,15 +329,73 @@ def train(args: SimpleMLPTrainingArgs) -> tuple[list[float], list[float], Simple
     return loss_list, accuracy_list, model
 
 
-args = SimpleMLPTrainingArgs()
-loss_list, accuracy_list, model = train(args)
+# args = SimpleMLPTrainingArgs()
+# loss_list, accuracy_list, model = train(args)
 
-line(
-    y=[loss_list, [0.1] + accuracy_list],  # we start by assuming a uniform accuracy of 10%
-    use_secondary_yaxis=True,
-    x_max=args.epochs * len(mnist_trainset),
-    labels={"x": "Num examples seen", "y1": "Cross entropy loss", "y2": "Test Accuracy"},
-    title="SimpleMLP training on MNIST",
-    width=800,
-)
+# line(
+#     y=[loss_list, [0.1] + accuracy_list],  # we start by assuming a uniform accuracy of 10%
+#     use_secondary_yaxis=True,
+#     x_max=args.epochs * len(mnist_trainset),
+#     labels={"x": "Num examples seen", "y1": "Cross entropy loss", "y2": "Test Accuracy"},
+#     title="SimpleMLP training on MNIST",
+#     width=800,
+# )
+# %%
+
+class Conv2d(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int = 1, padding: int = 0):
+        """
+        Same as torch.nn.Conv2d with bias=False.
+
+        Name your weight field `self.weight` for compatibility with the PyTorch version.
+
+        We assume kernel is square, with height = width = `kernel_size`.
+        """
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+
+        # YOUR CODE HERE - define & initialize `self.weight`
+        self.weight = nn.Parameter(self.rand((out_channels, in_channels, kernel_size, kernel_size)))
+
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Apply the functional conv2d, which you can import."""
+        return t.nn.functional.conv2d(x, self.weight, stride=self.stride, padding=self.padding)
+
+    def extra_repr(self) -> str:
+        keys = ["in_channels", "out_channels", "kernel_size", "stride", "padding"]
+        return ", ".join([f"{key}={getattr(self, key)}" for key in keys])
+    
+    def rand(self, size) -> Tensor:
+        bound = 1.0 / math.sqrt(self.in_channels * self.kernel_size * self.kernel_size)
+        # l + (r - l) * t.rand(*size)
+        # = -bound + (bound - (-bound)) * t.rand(*size)
+        # = -bound + 2 * bound * t.rand(*size)
+        # = bound(2 * t.rand(*size) - 1)
+        return bound * (2 * t.rand(*size) - 1)
+
+
+tests.test_conv2d_module(Conv2d)
+m = Conv2d(in_channels=24, out_channels=12, kernel_size=3, stride=2, padding=1)
+print(f"Manually verify that this is an informative repr: {m}")
+# %%
+
+class MaxPool2d(nn.Module):
+    def __init__(self, kernel_size: int, stride: int | None = None, padding: int = 1):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Call the functional version of maxpool2d."""
+        return F.max_pool2d(x, kernel_size=self.kernel_size, stride=self.stride, padding=self.padding)
+
+    def extra_repr(self) -> str:
+        """Add additional information to the string representation of this class."""
+        return ", ".join([f"{key}={getattr(self, key)}" for key in ["kernel_size", "stride", "padding"]])
 # %%
