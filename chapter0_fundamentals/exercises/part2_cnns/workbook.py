@@ -458,22 +458,20 @@ class BatchNorm2d(nn.Module):
         Return: shape (batch, channels, height, width)
         """
         if self.training:
-            mean = t.mean(x, dim=(0, 2, 3), keepdim=True) 
-            var = t.var(x, unbiased=False, dim=(0, 2, 3), keepdim=True)
+            mean = t.mean(x, dim=(0, 2, 3)) 
+            var = t.var(x, unbiased=False, dim=(0, 2, 3))
 
-            self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * einops.rearrange(mean, '1 c 1 1 -> c')
-            self.running_var = (1 - self.momentum) * self.running_var + self.momentum * einops.rearrange(var, '1 c 1 1 -> c')
+            self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
+            self.running_var = (1 - self.momentum) * self.running_var + self.momentum * var
             self.num_batches_tracked += 1
         else:
-            mean = einops.rearrange(self.running_mean, 'c -> 1 c 1 1')
-            var = einops.rearrange(self.running_var, 'c -> 1 c 1 1')
+            mean = self.running_mean
+            var = self.running_var
 
-        x_norm = (x - mean) / t.sqrt(var + self.eps) 
+        reshape = lambda x: einops.rearrange(x, 'channels -> 1 channels 1 1')
 
-        w = einops.rearrange(self.weight, "w -> 1 w 1 1")
-        b = einops.rearrange(self.bias, "b -> 1 b 1 1")
-        x_affine = x_norm * w + b
-
+        x_norm = (x - reshape(mean)) / t.sqrt(reshape(var) + self.eps) 
+        x_affine = x_norm * reshape(self.weight) + reshape(self.bias)
         return x_affine
 
     def extra_repr(self) -> str:
