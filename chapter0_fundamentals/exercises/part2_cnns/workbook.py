@@ -594,8 +594,14 @@ class ResNet34(nn.Module):
         x: shape (batch, channels, height, width)
         Return: shape (batch, n_classes)
         """
-        for x in self.modules():
-            x = x(x)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.pool1(x)
+        for i in range(len(self.n_blocks_per_group)):
+            x = getattr(self, f"block_group{i}")(x)
+        x = self.avgpool(x)
+        x = self.linear1(x)
         return x
 
 
