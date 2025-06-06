@@ -1056,3 +1056,48 @@ np.testing.assert_allclose(output.array, expected_output.array)
 
 print("All tests for `Linear` passed!")
 # %%
+
+class ReLU(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return relu(x)
+# %%
+class MLP(Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = Linear(28 * 28, 64)
+        self.linear2 = Linear(64, 64)
+        self.relu1 = ReLU()
+        self.relu2 = ReLU()
+        self.output = Linear(64, 10)
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = x.reshape((x.shape[0], 28 * 28))
+        x = self.relu1(self.linear1(x))
+        x = self.relu2(self.linear2(x))
+        x = self.output(x)
+        return x
+# %%
+
+def cross_entropy(logits: Tensor, true_labels: Tensor) -> Tensor:
+    """Like torch.nn.functional.cross_entropy with reduction='none'.
+
+    logits: shape (batch, classes)
+    true_labels: shape (batch,). Each element is the index of the correct label in the logits.
+
+    Return: shape (batch, ) containing the per-example loss.
+    """
+    # Calculate the log probabilities
+    exp_logits = logits.exp()
+    sum_exp = exp_logits.sum(dim=-1, keepdim=True)
+    log_probs = logits - sum_exp.log()
+
+    # Select the log probabilities corresponding to the true labels
+    batch_size = logits.shape[0]
+    selected_log_probs = log_probs[arange(0, batch_size), true_labels]
+
+    loss = -selected_log_probs
+
+    return loss
+
+
+tests.test_cross_entropy(Tensor, cross_entropy)
