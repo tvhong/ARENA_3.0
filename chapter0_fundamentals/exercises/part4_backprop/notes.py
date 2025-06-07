@@ -305,6 +305,18 @@ class Tensor:
         sub_(self, other, alpha=alpha)
         return self
 
+    def copy_(self, other: "Tensor") -> None:
+        self.array[:] = other.array[:]
+
+    def mul_(self, other: "Tensor") -> "Tensor":
+        np.multiply(self.array, other.array, out=self.array)
+        return self
+
+    def sqrt_(self) -> "Tensor":
+        """In-place square root."""
+        np.sqrt(self.array, out=self.array)
+        return self
+
     def __iadd__(self, other: "Tensor") -> "Tensor":
         self.add_(other)
         return self
@@ -328,6 +340,9 @@ class Tensor:
 
     def exp(self) -> "Tensor":
         return exp(self)
+
+    def log(self) -> "Tensor":
+        return log(self)
 
     def reshape(self, new_shape) -> "Tensor":
         return reshape(self, new_shape)
@@ -1155,8 +1170,60 @@ class SGD:
 tests.test_sgd(Parameter, Tensor, SGD)
 # %%
 
+class AdamW:
+    def __init__(
+        self,
+        params: Iterable[Parameter],
+        lr: float = 0.001,
+        betas: tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-08,
+        weight_decay: float = 0.0,
+    ):
+        """Implements Adam.
+
+        Like the PyTorch version, but assumes amsgrad=False and maximize=False
+            https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html
+        """
+        self.params = list(params)
+        self.lr = lr
+        self.beta1, self.beta2 = betas
+        self.eps = eps
+        self.lmda = weight_decay
+        self.t = 1
+
+        self.m = [zeros(*p.shape) for p in self.params]
+        self.v = [zeros(*p.shape) for p in self.params]
+
+    def zero_grad(self) -> None:
+        for p in self.params:
+            p.grad = None
+
+    def step(self) -> None:
+        with NoGrad():
+            for theta, m, v in zip(self.params, self.m, self.v):
+                g = theta.grad
+
+                theta -= self.lr * self.lmda * theta
+
+                m.copy_(self.beta1 * m + (1 - self.beta1) * g)
+                v.copy_(self.beta2 * v + (1 - self.beta2) * (g.mul_(g)))
+
+                m_hat = m / (1 - self.beta1**self.t)
+                v_hat = v / (1 - self.beta2**self.t)
+
+                theta -= self.lr * m_hat / (v_hat.sqrt_() + self.eps)
+
+            self.t += 1
+
+    def __repr__(self) -> str:
+        return f"AdamW(lr={self.lr}, beta1={self.beta1}, beta2={self.beta2}, eps={self.eps}, weight_decay={self.lmda})"
+
+# %%
+
 train_loader, test_loader = get_mnist()
 visualize(train_loader)
+
+
 # %%
 
 def train(model: MLP, train_loader: DataLoader, optimizer: SGD, epoch: int, train_loss_list: list | None = None):
@@ -1194,6 +1261,8 @@ def test(model: MLP, test_loader: DataLoader, test_accuracy_list: list | None = 
 num_epochs = 5
 model = MLP()
 start = time.time()
+
+# %%
 train_loss_list = []
 test_accuracy_list = []
 optimizer = SGD(model.parameters(), 0.01)
@@ -1202,4 +1271,36 @@ for epoch in range(num_epochs):
     test(model, test_loader, test_accuracy_list)
     optimizer.step()
 print(f"\nCompleted in {time.time() - start: .2f}s")
+# %%
+
+optimizer = AdamW(model.parameters())
+train_loss_list2 = []
+test_accuracy_list2 = []
+for epoch in range(num_epochs):
+    train(model, train_loader, optimizer, epoch, train_loss_list2)
+    test(model, test_loader, test_accuracy_list2)
+    optimizer.step()
+print(f"\nCompleted in {time.time() - start: .2f}s")
+
+# %%
+
+line(
+    [train_loss_list2, test_accuracy_list2],
+    x_max=num_epochs,
+    yaxis2_range=[0, 1],
+    use_secondary_yaxis=True,
+    labels={"x": "Batches seen", "y1": "Cross entropy loss", "y2": "Test accuracy"},
+    title="MLP training on MNIST from scratch!",
+    width=800,
+)
+
+line(
+    [train_loss_list, test_accuracy_list],
+    x_max=num_epochs,
+    yaxis2_range=[0, 1],
+    use_secondary_yaxis=True,
+    labels={"x": "Batches seen", "y1": "Cross entropy loss", "y2": "Test accuracy"},
+    title="MLP training on MNIST from scratch!",
+    width=800,
+)
 # %%
