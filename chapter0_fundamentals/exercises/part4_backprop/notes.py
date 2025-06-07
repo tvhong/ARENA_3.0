@@ -1283,7 +1283,15 @@ for epoch in range(num_epochs):
 print(f"\nCompleted in {time.time() - start: .2f}s")
 
 # %%
-
+line(
+    [train_loss_list, test_accuracy_list],
+    x_max=num_epochs,
+    yaxis2_range=[0, 1],
+    use_secondary_yaxis=True,
+    labels={"x": "Batches seen", "y1": "Cross entropy loss", "y2": "Test accuracy"},
+    title="MLP training on MNIST from scratch!",
+    width=800,
+)
 line(
     [train_loss_list2, test_accuracy_list2],
     x_max=num_epochs,
@@ -1294,13 +1302,5 @@ line(
     width=800,
 )
 
-line(
-    [train_loss_list, test_accuracy_list],
-    x_max=num_epochs,
-    yaxis2_range=[0, 1],
-    use_secondary_yaxis=True,
-    labels={"x": "Batches seen", "y1": "Cross entropy loss", "y2": "Test accuracy"},
-    title="MLP training on MNIST from scratch!",
-    width=800,
-)
+
 # %%
