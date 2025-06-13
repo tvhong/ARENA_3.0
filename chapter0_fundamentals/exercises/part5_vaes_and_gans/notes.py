@@ -279,8 +279,10 @@ class AutoencoderTrainer:
         assert self.step > 0, "First call should come after a training step. Remember to increment `self.step`."
         output = self.model(HOLDOUT_DATA)
         if self.args.use_wandb:
-            wandb.log({"source_images": [wandb.Image(arr) for arr in HOLDOUT_DATA.cpu().numpy()]}, step=self.step)
-            wandb.log({"output_images": [wandb.Image(arr) for arr in output.cpu().numpy()]}, step=self.step)
+            # Normalize output to [0, 255] range for logging
+            output = (output - output.min()) / (output.max() - output.min())
+            output = (output * 255).to(dtype=t.uint8)
+            wandb.log({"images": [wandb.Image(arr) for arr in output.cpu().numpy()]}, step=self.step)
         else:
             display_data(t.concat([HOLDOUT_DATA, output]), nrows=2, title="AE reconstructions")
 
@@ -313,19 +315,3 @@ args = AutoencoderArgs(use_wandb=True)
 trainer = AutoencoderTrainer(args)
 autoencoder = trainer.train()
  
-
-# %%
-
-wandb.init(project="vhong-test")
-
-# %%
-
-img, _label = next(iter(trainer.trainloader))
-print(img.shape)
-y = trainer.model(img.to(device))
-print(y.shape)
-y = (y - y.min()) / (y.max() - y.min())
-y = (y * 255).to(dtype=t.uint8)
-print(y[0].shape)
-
-wandb.log({"images": wandb.Image(y[0].cpu(), caption="Original Image")}, step=5)
